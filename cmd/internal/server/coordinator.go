@@ -20,11 +20,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/LawyZheng/promproxy/internal/util"
+
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/google/uuid"
-	"github.com/prometheus-community/pushprox/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )

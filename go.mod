@@ -1,4 +1,4 @@
-module github.com/prometheus-community/pushprox
+module github.com/LawyZheng/promproxy
 
 go 1.19
 

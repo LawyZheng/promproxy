@@ -10,7 +10,7 @@ While this is reasonably robust in practice, this is a work in progress.
 First build the proxy and client:
 
 ```
-git clone https://github.com/prometheus-community/pushprox.git
+git clone https://github.com/LawyZheng/promproxy.git
 cd pushprox
 make build
 ```

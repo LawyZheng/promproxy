@@ -28,13 +28,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LawyZheng/promproxy/internal/util"
+
 	"github.com/Showmax/go-fqdn"
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
-	"github.com/prometheus-community/pushprox/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/promlog"
@@ -165,7 +166,7 @@ func (c *Coordinator) doPush(resp *http.Response, origRequest *http.Request, cli
 	url := base.ResolveReference(u)
 
 	buf := &bytes.Buffer{}
-	//nolint:errcheck // https://github.com/prometheus-community/PushProx/issues/111
+	//nolint:errcheck // https://github.com/LawyZheng/promproxy/issues/111
 	resp.Write(buf)
 	request := &http.Request{
 		Method:        "POST",
