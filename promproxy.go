@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,6 +125,8 @@ func (c *Client) handleErr(request *http.Request, err error) error {
 		Body:       io.NopCloser(strings.NewReader(err.Error())),
 		Header:     http.Header{},
 	}
+	defer resp.Body.Close()
+
 	if err := c.doPush(resp, request); err != nil {
 		c.pushCount.Inc()
 		return errors.Wrap(err, "failed to push scrape response")
@@ -149,7 +152,10 @@ func (c *Client) doScrape(request *http.Request) error {
 	record := httptest.NewRecorder()
 	c.ServeHTTP(record, request)
 
-	if err = c.doPush(record.Result(), request); err != nil {
+	response := record.Result()
+	defer response.Body.Close()
+
+	if err = c.doPush(response, request); err != nil {
 		c.pushCount.Inc()
 		return errors.Wrap(err, "failed to push scrape response")
 	}
@@ -177,12 +183,8 @@ func (c *Client) doPush(resp *http.Response, origRequest *http.Request) error {
 	buf := &bytes.Buffer{}
 	//nolint:errcheck
 	resp.Write(buf)
-	request := &http.Request{
-		Method:        "POST",
-		URL:           url,
-		Body:          io.NopCloser(buf),
-		ContentLength: int64(buf.Len()),
-	}
+	request, _ := http.NewRequest(http.MethodPost, url.String(), buf)
+	request.Header.Set("Content-Length", strconv.Itoa(buf.Len()))
 	request = request.WithContext(origRequest.Context())
 	if _, err = c.do(request); err != nil {
 		return err
