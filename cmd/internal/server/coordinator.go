@@ -167,7 +167,7 @@ func (c *Coordinator) WaitForScrapeInstruction(fqdn string) (*http.Request, erro
 func (c *Coordinator) ScrapeResult(r *http.Response) error {
 	id := r.Header.Get("Id")
 	level.Info(c.logger).Log("msg", "ScrapeResult", "scrape_id", id)
-	ctx, cancel := context.WithTimeout(context.Background(), util.GetScrapeTimeout(maxScrapeTimeout, defaultScrapeTimeout, r.Header))
+	ctx, cancel := context.WithTimeout(context.Background(), util.GetScrapeTimeout(*maxScrapeTimeout, *defaultScrapeTimeout, r.Header))
 	defer cancel()
 	// Don't expose internal headers.
 	r.Header.Del("Id")

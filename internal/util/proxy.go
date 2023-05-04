@@ -19,14 +19,14 @@ import (
 	"time"
 )
 
-func GetScrapeTimeout(maxScrapeTimeout, defaultScrapeTimeout *time.Duration, h http.Header) time.Duration {
-	timeout := *defaultScrapeTimeout
+func GetScrapeTimeout(maxScrapeTimeout, defaultScrapeTimeout time.Duration, h http.Header) time.Duration {
+	timeout := defaultScrapeTimeout
 	headerTimeout, err := GetHeaderTimeout(h)
 	if err == nil {
 		timeout = headerTimeout
 	}
-	if timeout > *maxScrapeTimeout {
-		timeout = *maxScrapeTimeout
+	if timeout > maxScrapeTimeout {
+		timeout = maxScrapeTimeout
 	}
 	return timeout
 }

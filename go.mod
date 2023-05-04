@@ -8,9 +8,11 @@ require (
 	github.com/cenkalti/backoff/v4 v4.2.0
 	github.com/go-kit/log v0.2.1
 	github.com/google/uuid v1.3.0
+	github.com/lawyzheng/lyhook v0.0.5
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.14.0
 	github.com/prometheus/common v0.42.0
+	github.com/sirupsen/logrus v1.9.0
 )
 
 require (
@@ -19,6 +21,8 @@ require (
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
+	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible // indirect
+	github.com/lestrrat-go/strftime v1.0.6 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect

@@ -169,7 +169,7 @@ func (h *httpHandler) handleListClients(w http.ResponseWriter, r *http.Request) 
 
 // handleProxy handles proxied scrapes from Prometheus.
 func (h *httpHandler) handleProxy(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), util.GetScrapeTimeout(maxScrapeTimeout, defaultScrapeTimeout, r.Header))
+	ctx, cancel := context.WithTimeout(r.Context(), util.GetScrapeTimeout(*maxScrapeTimeout, *defaultScrapeTimeout, r.Header))
 	defer cancel()
 	request := r.WithContext(ctx)
 	request.RequestURI = ""

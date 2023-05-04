@@ -1,4 +1,4 @@
-package promproxy
+package client
 
 import "fmt"
 
