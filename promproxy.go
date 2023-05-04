@@ -17,14 +17,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"reflect"
 	"strings"
 	"time"
 
@@ -72,18 +69,28 @@ func New(registerName, endpoint string, registry *prometheus.Registry) *Client {
 		gatherer = prometheus.DefaultGatherer
 	}
 
+	scrapeCount := newScrapeCount()
+	pushCount := newPushCount()
+	pollCount := newPollCount()
+	register.MustRegister(scrapeCount, pushCount, pollCount)
+
+	handler := promhttp.InstrumentMetricHandler(
+		register, promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{}),
+	)
+
 	return &Client{
 		RegisterName: registerName,
 		Endpoint:     endpoint,
 
+		logger:           &defaultLogger{},
+		httpClient:       http.DefaultClient,
+		httpHandler:      handler,
 		retryInitialWait: time.Second,
 		retryMaxWait:     5 * time.Second,
 
-		register:    register,
-		gatherer:    gatherer,
-		scrapeCount: newScrapeCount(),
-		pushCount:   newPushCount(),
-		pollCount:   newPollCount(),
+		scrapeCount: scrapeCount,
+		pushCount:   pushCount,
+		pollCount:   pollCount,
 	}
 }
 
@@ -91,26 +98,33 @@ type Client struct {
 	RegisterName string
 	Endpoint     string
 
-	logger           Logger
-	tlsConfig        *tls.Config
 	retryInitialWait time.Duration
 	retryMaxWait     time.Duration
+	modifyRequest    func(r *http.Request) *http.Request
+	logger           Logger
+	httpClient       *http.Client
+	httpHandler      http.Handler
 
-	register    prometheus.Registerer
-	gatherer    prometheus.Gatherer
 	scrapeCount prometheus.Counter
 	pushCount   prometheus.Counter
 	pollCount   prometheus.Counter
 }
 
-func (c *Client) handleErr(request *http.Request, client *http.Client, err error) error {
+func (c *Client) do(req *http.Request) (*http.Response, error) {
+	if c.modifyRequest != nil {
+		req = c.modifyRequest(req)
+	}
+	return c.httpClient.Do(req)
+}
+
+func (c *Client) handleErr(request *http.Request, err error) error {
 	c.scrapeCount.Inc()
 	resp := &http.Response{
 		StatusCode: http.StatusInternalServerError,
 		Body:       io.NopCloser(strings.NewReader(err.Error())),
 		Header:     http.Header{},
 	}
-	if err := c.doPush(resp, request, client); err != nil {
+	if err := c.doPush(resp, request); err != nil {
 		c.pushCount.Inc()
 		return errors.Wrap(err, "failed to push scrape response")
 	}
@@ -118,10 +132,10 @@ func (c *Client) handleErr(request *http.Request, client *http.Client, err error
 	return err
 }
 
-func (c *Client) doScrape(request *http.Request, client *http.Client, handler http.Handler) error {
+func (c *Client) doScrape(request *http.Request) error {
 	timeout, err := util.GetHeaderTimeout(request.Header)
 	if err != nil {
-		return c.handleErr(request, client, errors.Wrap(err, "get timeout error"))
+		return c.handleErr(request, errors.Wrap(err, "get timeout error"))
 	}
 
 	ctx, cancel := context.WithTimeout(request.Context(), timeout)
@@ -129,13 +143,13 @@ func (c *Client) doScrape(request *http.Request, client *http.Client, handler ht
 	request = request.WithContext(ctx)
 
 	if request.URL.Hostname() != c.RegisterName {
-		return c.handleErr(request, client, errors.New("scrape target doesn't match client register name"))
+		return c.handleErr(request, errors.New("scrape target doesn't match client register name"))
 	}
 
 	record := httptest.NewRecorder()
-	handler.ServeHTTP(record, request)
+	c.ServeHTTP(record, request)
 
-	if err = c.doPush(record.Result(), request, client); err != nil {
+	if err = c.doPush(record.Result(), request); err != nil {
 		c.pushCount.Inc()
 		return errors.Wrap(err, "failed to push scrape response")
 	}
@@ -144,7 +158,7 @@ func (c *Client) doScrape(request *http.Request, client *http.Client, handler ht
 }
 
 // Report the result of the scrape back up to the proxy.
-func (c *Client) doPush(resp *http.Response, origRequest *http.Request, client *http.Client) error {
+func (c *Client) doPush(resp *http.Response, origRequest *http.Request) error {
 	resp.Header.Set("id", origRequest.Header.Get("id")) // Link the request and response
 	// Remaining scrape deadline.
 	deadline, _ := origRequest.Context().Deadline()
@@ -161,7 +175,7 @@ func (c *Client) doPush(resp *http.Response, origRequest *http.Request, client *
 	url := base.ResolveReference(u)
 
 	buf := &bytes.Buffer{}
-	//nolint:errcheck // https://github.com/LawyZheng/promproxy/issues/111
+	//nolint:errcheck
 	resp.Write(buf)
 	request := &http.Request{
 		Method:        "POST",
@@ -170,13 +184,13 @@ func (c *Client) doPush(resp *http.Response, origRequest *http.Request, client *
 		ContentLength: int64(buf.Len()),
 	}
 	request = request.WithContext(origRequest.Context())
-	if _, err = client.Do(request); err != nil {
+	if _, err = c.do(request); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (c *Client) doPoll(client *http.Client, handler http.Handler) error {
+func (c *Client) doPoll() error {
 	base, err := url.Parse(c.Endpoint)
 	if err != nil {
 		return errors.Wrap(err, "error parsing url")
@@ -187,7 +201,8 @@ func (c *Client) doPoll(client *http.Client, handler http.Handler) error {
 	}
 	url := base.ResolveReference(u)
 
-	resp, err := client.Post(url.String(), "", strings.NewReader(c.RegisterName))
+	req, _ := http.NewRequest(http.MethodPost, url.String(), strings.NewReader(c.RegisterName))
+	resp, err := c.do(req)
 	if err != nil {
 		return errors.Wrap(err, "error polling")
 	}
@@ -200,15 +215,12 @@ func (c *Client) doPoll(client *http.Client, handler http.Handler) error {
 	c.logger.Info("get scrape request", request.Header.Get("id"), request.URL.Hostname())
 
 	request.RequestURI = ""
-	return c.doScrape(request, client, handler)
+	return c.doScrape(request)
 }
 
-func (c *Client) loop(ctx context.Context, bo backoff.BackOff, client *http.Client) {
-	handler := promhttp.InstrumentMetricHandler(
-		c.register, promhttp.HandlerFor(c.gatherer, promhttp.HandlerOpts{}),
-	)
+func (c *Client) loop(ctx context.Context, bo backoff.BackOff) {
 	op := func() error {
-		return c.doPoll(client, handler)
+		return c.doPoll()
 	}
 
 	for {
@@ -225,8 +237,13 @@ func (c *Client) loop(ctx context.Context, bo backoff.BackOff, client *http.Clie
 	}
 }
 
-func (c *Client) SetTLSConfig(tlsConfig *tls.Config) *Client {
-	c.tlsConfig = tlsConfig
+// ServeHTTP implement http.Handler interface
+func (c *Client) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	c.httpHandler.ServeHTTP(rw, req)
+}
+
+func (c *Client) SetHTTPClient(client *http.Client) *Client {
+	c.httpClient = client
 	return c
 }
 
@@ -235,28 +252,13 @@ func (c *Client) SetLogger(logger Logger) *Client {
 	return c
 }
 
-func (c *Client) Run(ctx context.Context) {
-	if c.logger == nil || reflect.ValueOf(c.logger).IsNil() {
-		c.logger = &defaultLogger{}
-	}
+func (c *Client) SetModifyRequest(fn func(r *http.Request) *http.Request) *Client {
+	c.modifyRequest = fn
+	return c
+}
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-				DualStack: true,
-			}).DialContext,
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			TLSClientConfig:       c.tlsConfig,
-		},
-	}
-	c.register.MustRegister(c.pushCount, c.pollCount, c.scrapeCount)
-	c.loop(ctx, newBackOffFromFlags(c.retryInitialWait, c.retryMaxWait), client)
+func (c *Client) Run(ctx context.Context) {
+	c.loop(ctx, newBackOffFromFlags(c.retryInitialWait, c.retryMaxWait))
 }
 
 func (c *Client) RunBackGround(ctx context.Context) {
