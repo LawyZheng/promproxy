@@ -2,7 +2,7 @@ go:
     # This must match .circle/config.yml.
     version: 1.20
 repository:
-    path: github.com/LawyZheng/promproxy
+    path: github.com/lawyzheng/promproxy
 build:
     binaries:
         - name: pushprox-client

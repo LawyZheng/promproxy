@@ -24,7 +24,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/LawyZheng/promproxy/internal/util"
+	"github.com/lawyzheng/promproxy/internal/util"
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log"
@@ -149,7 +149,7 @@ func (h *httpHandler) handlePoll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Error WaitForScrapeInstruction: %s", err.Error()), 408)
 		return
 	}
-	//nolint:errcheck // https://github.com/LawyZheng/promproxy/issues/111
+	//nolint:errcheck // https://github.com/lawyzheng/promproxy/issues/111
 	request.WriteProxy(w) // Send full request as the body of the response.
 	level.Info(h.logger).Log("msg", "Responded to /poll", "url", request.URL.String(), "scrape_id", request.Header.Get("Id"))
 }
@@ -162,7 +162,7 @@ func (h *httpHandler) handleListClients(w http.ResponseWriter, r *http.Request) 
 		targets = append(targets, &targetGroup{Targets: []string{k}})
 	}
 	w.Header().Set("Content-Type", "application/json")
-	//nolint:errcheck // https://github.com/LawyZheng/promproxy/issues/111
+	//nolint:errcheck // https://github.com/lawyzheng/promproxy/issues/111
 	json.NewEncoder(w).Encode(targets)
 	level.Info(h.logger).Log("msg", "Responded to /clients", "client_count", len(known))
 }

@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/LawyZheng/promproxy/internal/util"
+	"github.com/lawyzheng/promproxy/internal/util"
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log"

@@ -14,8 +14,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 
-	"github.com/LawyZheng/promproxy/internal/model"
-	"github.com/LawyZheng/promproxy/internal/util"
+	"github.com/lawyzheng/promproxy/internal/model"
+	"github.com/lawyzheng/promproxy/internal/util"
 )
 
 var (

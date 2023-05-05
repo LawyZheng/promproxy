@@ -1,4 +1,4 @@
-module github.com/LawyZheng/promproxy
+module github.com/lawyzheng/promproxy
 
 go 1.19
 

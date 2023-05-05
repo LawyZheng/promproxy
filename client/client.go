@@ -27,8 +27,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LawyZheng/promproxy/internal/model"
-	"github.com/LawyZheng/promproxy/internal/util"
+	"github.com/lawyzheng/promproxy/internal/model"
+	"github.com/lawyzheng/promproxy/internal/util"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/pkg/errors"

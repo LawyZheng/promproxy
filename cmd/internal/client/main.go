@@ -28,7 +28,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LawyZheng/promproxy/internal/util"
+	"github.com/lawyzheng/promproxy/internal/util"
 
 	"github.com/Showmax/go-fqdn"
 	"github.com/alecthomas/kingpin/v2"
@@ -166,7 +166,7 @@ func (c *Coordinator) doPush(resp *http.Response, origRequest *http.Request, cli
 	url := base.ResolveReference(u)
 
 	buf := &bytes.Buffer{}
-	//nolint:errcheck // https://github.com/LawyZheng/promproxy/issues/111
+	//nolint:errcheck // https://github.com/lawyzheng/promproxy/issues/111
 	resp.Write(buf)
 	request := &http.Request{
 		Method:        "POST",
