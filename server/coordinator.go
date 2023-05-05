@@ -21,11 +21,21 @@ func newClientGauge() prometheus.Gauge {
 	)
 }
 
+type knownClient struct {
+	PollClient
+	expire time.Time
+}
+
+type PollClient interface {
+	GetName() string
+	GetLabels() map[string]string
+}
+
 type Coordinator interface {
 	DoScrape(ctx context.Context, r *http.Request) (*http.Response, error)
-	WaitForScrapeInstruction(name string) (*http.Request, error)
+	WaitForScrapeInstruction(client PollClient) (*http.Request, error)
 	ScrapeResult(ctx context.Context, r *http.Response) error
-	KnownClients() []string
+	KnownClients() []PollClient
 }
 
 // coordinator for scrape requests and responses
@@ -37,7 +47,7 @@ type coordinator struct {
 	// Responses from clients.
 	responses map[string]chan *http.Response
 	// Clients we know about and when they last contacted us.
-	known map[string]time.Time
+	known map[string]knownClient
 
 	logger              *logrus.Logger
 	clientCounter       prometheus.Gauge
@@ -52,7 +62,7 @@ func newCoordinator(logger *logrus.Logger) Coordinator {
 	c := &coordinator{
 		waiting:   map[string]chan *http.Request{},
 		responses: map[string]chan *http.Response{},
-		known:     map[string]time.Time{},
+		known:     map[string]knownClient{},
 
 		logger:              logger,
 		clientCounter:       counter,
@@ -127,12 +137,12 @@ func (c *coordinator) DoScrape(ctx context.Context, r *http.Request) (*http.Resp
 }
 
 // WaitForScrapeInstruction registers a client waiting for a scrape result
-func (c *coordinator) WaitForScrapeInstruction(name string) (*http.Request, error) {
-	c.logger.WithField("name", name).Info("WaitForScrapeInstruction")
+func (c *coordinator) WaitForScrapeInstruction(client PollClient) (*http.Request, error) {
+	c.logger.WithField("name", client.GetName()).Info("WaitForScrapeInstruction")
 
-	c.addKnownClient(name)
+	c.addKnownClient(client)
 	// TODO: What if the client times out?
-	ch := c.getRequestChannel(name)
+	ch := c.getRequestChannel(client.GetName())
 
 	// exhaust existing poll request (eg. timeouted queues)
 	select {
@@ -173,24 +183,27 @@ func (c *coordinator) ScrapeResult(ctx context.Context, r *http.Response) error 
 	}
 }
 
-func (c *coordinator) addKnownClient(fqdn string) {
+func (c *coordinator) addKnownClient(client PollClient) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.known[fqdn] = time.Now()
+	c.known[client.GetName()] = knownClient{
+		PollClient: client,
+		expire:     time.Now(),
+	}
 	c.clientCounter.Set(float64(len(c.known)))
 }
 
 // KnownClients returns a list of alive clients
-func (c *coordinator) KnownClients() []string {
+func (c *coordinator) KnownClients() []PollClient {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	limit := time.Now().Add(-c.registrationTimeout)
-	known := make([]string, 0, len(c.known))
-	for k, t := range c.known {
-		if limit.Before(t) {
-			known = append(known, k)
+	known := make([]PollClient, 0, len(c.known))
+	for _, t := range c.known {
+		if limit.Before(t.expire) {
+			known = append(known, t)
 		}
 	}
 	return known
@@ -205,7 +218,7 @@ func (c *coordinator) gc() {
 			limit := time.Now().Add(-c.registrationTimeout)
 			deleted := 0
 			for k, ts := range c.known {
-				if ts.Before(limit) {
+				if ts.expire.Before(limit) {
 					delete(c.known, k)
 					deleted++
 				}

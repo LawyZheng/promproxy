@@ -17,6 +17,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LawyZheng/promproxy/internal/model"
 	"github.com/LawyZheng/promproxy/internal/util"
 
 	"github.com/cenkalti/backoff/v4"
@@ -83,6 +85,7 @@ func New(registerName, endpoint string, registry *prometheus.Registry) *Client {
 		RegisterName: registerName,
 		Endpoint:     endpoint,
 
+		labels:           make(map[string]string),
 		logger:           &defaultLogger{},
 		httpClient:       http.DefaultClient,
 		httpHandler:      handler,
@@ -99,6 +102,7 @@ type Client struct {
 	RegisterName string
 	Endpoint     string
 
+	labels           model.Labels
 	retryInitialWait time.Duration
 	retryMaxWait     time.Duration
 	modifyRequest    func(r *http.Request) *http.Request
@@ -212,7 +216,12 @@ func (c *Client) doPoll() error {
 	}
 	url := base.ResolveReference(u)
 
-	req, _ := http.NewRequest(http.MethodPost, url.String(), strings.NewReader(c.RegisterName))
+	b, _ := json.Marshal(model.ClientPollRequest{
+		Name:   c.RegisterName,
+		Labels: c.labels,
+	})
+
+	req, _ := http.NewRequest(http.MethodPost, url.String(), bytes.NewBuffer(b))
 	resp, err := c.do(req)
 	if err != nil {
 		return errors.Wrap(err, "error polling")
@@ -269,6 +278,11 @@ func (c *Client) SetLogger(logger Logger) *Client {
 
 func (c *Client) SetModifyRequest(fn func(r *http.Request) *http.Request) *Client {
 	c.modifyRequest = fn
+	return c
+}
+
+func (c *Client) SetLabels(labels map[string]string) *Client {
+	c.labels = labels
 	return c
 }
 

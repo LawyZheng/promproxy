@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 
+	"github.com/LawyZheng/promproxy/internal/model"
 	"github.com/LawyZheng/promproxy/internal/util"
 )
 
@@ -166,15 +166,23 @@ func (h *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 
 // handlePoll handles clients registering and asking for scrapes.
 func (h *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
-	name, _ := io.ReadAll(r.Body)
+	b, _ := io.ReadAll(r.Body)
+	defer r.Body.Close()
+
+	client := model.ClientPollRequest{}
+	if err := json.Unmarshal(b, &client); err != nil {
+		h.logger.Error("unmarshal failed: ", err)
+		http.Error(w, fmt.Sprintf("unmarshal failed: %s", err), http.StatusBadRequest)
+		return
+	}
 
 	if err := h.handleClientAuth(r); err != nil {
-		h.logger.WithField("name", string(name)).Error("Auth Failed: ", err)
+		h.logger.WithField("name", client.Name).Error("Auth Failed: ", err)
 		http.Error(w, fmt.Sprintf("Auth failed: %s", err), http.StatusUnauthorized)
 		return
 	}
 
-	request, err := h.coordinator.WaitForScrapeInstruction(strings.TrimSpace(string(name)))
+	request, err := h.coordinator.WaitForScrapeInstruction(client)
 	if err != nil {
 		h.logger.Error("Error WaitForScrapeInstruction: ", err)
 		http.Error(w, fmt.Sprintf("Error WaitForScrapeInstruction: %s", err.Error()), 408)
@@ -198,7 +206,10 @@ func (h *Server) handleListClients(w http.ResponseWriter, r *http.Request) {
 	known := h.coordinator.KnownClients()
 	targets := make([]*targetGroup, 0, len(known))
 	for _, k := range known {
-		targets = append(targets, &targetGroup{Targets: []string{k}})
+		targets = append(targets, &targetGroup{
+			Targets: []string{k.GetName()},
+			Labels:  k.GetLabels(),
+		})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	//nolint:errcheck
