@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lawyzheng/lyhook"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -26,6 +25,11 @@ var (
 type targetGroup struct {
 	Targets []string          `json:"targets"`
 	Labels  map[string]string `json:"labels"`
+}
+
+type Router interface {
+	Handle(pattern string, handler http.Handler)
+	http.Handler
 }
 
 func newHttpAPICounter() *prometheus.CounterVec {
@@ -66,37 +70,40 @@ type Server struct {
 	DefaultScrapeTimeout time.Duration
 	MaxScrapeTimeout     time.Duration
 
+	rm          map[string]http.HandlerFunc
+	clientAuth  func(r *http.Request) error
+	promAuth    func(r *http.Request) error
+	router      Router
 	coordinator Coordinator
-	mux         http.Handler
 	proxy       http.Handler
-	logger      lyhook.Logger
+	logger      *logrus.Logger
 }
 
-func New(mux *http.ServeMux) *Server {
+func New(router Router) *Server {
 	logger := defaultLogger
 
 	h := &Server{
 		logger:      logger,
 		coordinator: newCoordinator(logger),
-		mux:         mux,
+		router:      router,
 
 		DefaultScrapeTimeout: 15 * time.Second,
 		MaxScrapeTimeout:     5 * time.Minute,
 	}
 
 	// api handlers
-	handlers := map[string]http.HandlerFunc{
+	h.rm = map[string]http.HandlerFunc{
 		"/push":    h.handlePush,
 		"/poll":    h.handlePoll,
 		"/clients": h.handleListClients,
 		"/metrics": promhttp.Handler().ServeHTTP,
 	}
-	for path, handlerFunc := range handlers {
+	for path, handlerFunc := range h.rm {
 		counter := newHttpAPICounter().MustCurryWith(prometheus.Labels{"path": path})
 		handler := promhttp.InstrumentHandlerCounter(counter, http.HandlerFunc(handlerFunc))
 		histogram := newHttpPathHistogram().MustCurryWith(prometheus.Labels{"path": path})
 		handler = promhttp.InstrumentHandlerDuration(histogram, handler)
-		mux.Handle(path, handler)
+		router.Handle(path, handler)
 		counter.WithLabelValues("200")
 		if path == "/push" {
 			counter.WithLabelValues("500")
@@ -112,6 +119,22 @@ func New(mux *http.ServeMux) *Server {
 	return h
 }
 
+func (h *Server) handleClientAuth(req *http.Request) error {
+	if h.clientAuth == nil {
+		return nil
+	}
+
+	return h.clientAuth(req)
+}
+
+func (h *Server) handlePromAuth(req *http.Request) error {
+	if h.promAuth == nil {
+		return nil
+	}
+
+	return h.promAuth(req)
+}
+
 // handlePush handles scrape responses from client.
 func (h *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	buf := &bytes.Buffer{}
@@ -124,6 +147,12 @@ func (h *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	}
 	scrapeId := scrapeResult.Header.Get("Id")
 	h.logger.WithField("scrape_id", scrapeId).Info("Got /push")
+
+	if err := h.handleClientAuth(r); err != nil {
+		h.logger.WithField("scrape_id", scrapeId).Error("Auth Failed: ", err)
+		http.Error(w, fmt.Sprintf("Auth failed: %s", err), http.StatusUnauthorized)
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), util.GetScrapeTimeout(h.MaxScrapeTimeout, h.DefaultScrapeTimeout, scrapeResult.Header))
 	defer cancel()
@@ -138,6 +167,13 @@ func (h *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 // handlePoll handles clients registering and asking for scrapes.
 func (h *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 	name, _ := io.ReadAll(r.Body)
+
+	if err := h.handleClientAuth(r); err != nil {
+		h.logger.WithField("name", string(name)).Error("Auth Failed: ", err)
+		http.Error(w, fmt.Sprintf("Auth failed: %s", err), http.StatusUnauthorized)
+		return
+	}
+
 	request, err := h.coordinator.WaitForScrapeInstruction(strings.TrimSpace(string(name)))
 	if err != nil {
 		h.logger.Error("Error WaitForScrapeInstruction: ", err)
@@ -147,13 +183,18 @@ func (h *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 	//nolint:errcheck
 	request.WriteProxy(w) // Send full request as the body of the response.
 	h.logger.WithFields(map[string]interface{}{
-		"url":       request.URL.String(),
+		"name":      request.URL.Hostname(),
 		"scrape_id": request.Header.Get("Id"),
 	}).Info("Responded to /poll")
 }
 
 // handleListClients handles requests to list available clients as a JSON array.
 func (h *Server) handleListClients(w http.ResponseWriter, r *http.Request) {
+	if err := h.handlePromAuth(r); err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
 	known := h.coordinator.KnownClients()
 	targets := make([]*targetGroup, 0, len(known))
 	for _, k := range known {
@@ -167,6 +208,11 @@ func (h *Server) handleListClients(w http.ResponseWriter, r *http.Request) {
 
 // handleProxy handles proxied scrapes from Prometheus.
 func (h *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
+	if err := h.handlePromAuth(r); err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), util.GetScrapeTimeout(h.MaxScrapeTimeout, h.DefaultScrapeTimeout, r.Header))
 	defer cancel()
 	request := r.WithContext(ctx)
@@ -174,15 +220,25 @@ func (h *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.coordinator.DoScrape(ctx, request)
 	if err != nil {
-		h.logger.WithField("url", request.URL.String()).Error("Error scraping: ", err, "url")
-		http.Error(w, fmt.Sprintf("Error scraping %q: %s", request.URL.String(), err.Error()), 500)
+		h.logger.WithField("name", request.URL.Hostname()).Error("Error scraping: ", err)
+		http.Error(w, fmt.Sprintf("Error scraping %q: %s", request.URL.Hostname(), err.Error()), 500)
 		return
 	}
 	defer resp.Body.Close()
 	copyHTTPResponse(resp, w)
 }
 
-func (h *Server) SetLogger(logger lyhook.Logger) *Server {
+func (h *Server) SetPromAuth(fn func(r *http.Request) error) *Server {
+	h.promAuth = fn
+	return h
+}
+
+func (h *Server) SetClientAuth(fn func(r *http.Request) error) *Server {
+	h.clientAuth = fn
+	return h
+}
+
+func (h *Server) SetLogger(logger *logrus.Logger) *Server {
 	h.logger = logger
 	return h
 }
@@ -192,11 +248,19 @@ func (h *Server) SetCoordinator(coordinator Coordinator) *Server {
 	return h
 }
 
+func (h *Server) ProxyHandler() http.Handler {
+	return h.proxy
+}
+
+func (h *Server) RouterHandler() map[string]http.HandlerFunc {
+	return h.rm
+}
+
 // ServeHTTP discriminates between proxy requests (e.g. from Prometheus) and other requests (e.g. from the Client).
 func (h *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Host != "" { // Proxy request
 		h.proxy.ServeHTTP(w, r)
 	} else { // Non-proxy requests
-		h.mux.ServeHTTP(w, r)
+		h.router.ServeHTTP(w, r)
 	}
 }

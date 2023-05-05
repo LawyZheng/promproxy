@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lawyzheng/lyhook"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/sirupsen/logrus"
 )
 
 func newClientGauge() prometheus.Gauge {
@@ -39,13 +39,13 @@ type coordinator struct {
 	// Clients we know about and when they last contacted us.
 	known map[string]time.Time
 
-	logger              lyhook.Logger
+	logger              *logrus.Logger
 	clientCounter       prometheus.Gauge
 	registrationTimeout time.Duration
 }
 
 // newCoordinator initiates the coordinator and starts the client cleanup routine
-func newCoordinator(logger lyhook.Logger) Coordinator {
+func newCoordinator(logger *logrus.Logger) Coordinator {
 	counter := newClientGauge()
 	prometheus.MustRegister(counter)
 

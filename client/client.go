@@ -115,7 +115,16 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 	if c.modifyRequest != nil {
 		req = c.modifyRequest(req)
 	}
-	return c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return resp, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("returned HTTP status %d", resp.StatusCode)
+	}
+	return resp, err
+
 }
 
 func (c *Client) handleErr(request *http.Request, err error) error {
@@ -222,7 +231,11 @@ func (c *Client) doPoll() error {
 
 func (c *Client) loop(ctx context.Context, bo backoff.BackOff) {
 	op := func() error {
-		return c.doPoll()
+		if err := c.doPoll(); err != nil {
+			c.logger.Error(err)
+			return err
+		}
+		return nil
 	}
 
 	for {
