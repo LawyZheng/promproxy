@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lawyzheng/promproxy/internal/model"
@@ -34,6 +35,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+var (
+	ErrClientStillRunning = errors.New("client is running")
 )
 
 func newScrapeCount() prometheus.Counter {
@@ -85,6 +90,7 @@ func New(registerName, endpoint string, registry *prometheus.Registry) *Client {
 		RegisterName: registerName,
 		Endpoint:     endpoint,
 
+		mu:               new(sync.Mutex),
 		labels:           make(map[string]string),
 		logger:           &defaultLogger{},
 		httpClient:       http.DefaultClient,
@@ -102,6 +108,8 @@ type Client struct {
 	RegisterName string
 	Endpoint     string
 
+	mu               *sync.Mutex
+	running          bool
 	labels           model.Labels
 	retryInitialWait time.Duration
 	retryMaxWait     time.Duration
@@ -239,6 +247,22 @@ func (c *Client) doPoll() error {
 }
 
 func (c *Client) loop(ctx context.Context, bo backoff.BackOff) error {
+	c.mu.Lock()
+	if c.running {
+		defer c.mu.Unlock()
+		return ErrClientStillRunning
+	}
+
+	c.running = true
+	c.mu.Unlock()
+
+	// change running after this function returned
+	defer func() {
+		c.mu.Lock()
+		c.running = false
+		c.mu.Unlock()
+	}()
+
 	op := func() error {
 		if err := c.doPoll(); err != nil {
 			c.logger.Error(err)
@@ -255,7 +279,9 @@ func (c *Client) loop(ctx context.Context, bo backoff.BackOff) error {
 			if err := backoff.RetryNotify(op, backoff.WithContext(bo, ctx), func(err error, _ time.Duration) {
 				c.pollCount.Inc()
 			}); err != nil {
-				c.logger.Error(err)
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+					c.logger.Error(err)
+				}
 			}
 		}
 	}
@@ -267,23 +293,42 @@ func (c *Client) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 }
 
 func (c *Client) SetHTTPClient(client *http.Client) *Client {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.httpClient = client
 	return c
 }
 
 func (c *Client) SetLogger(logger Logger) *Client {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.logger = logger
 	return c
 }
 
 func (c *Client) SetModifyRequest(fn func(r *http.Request) *http.Request) *Client {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.modifyRequest = fn
 	return c
 }
 
 func (c *Client) SetLabels(labels map[string]string) *Client {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.labels = labels
 	return c
+}
+
+func (c *Client) IsRunning() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.running
 }
 
 func (c *Client) Run(ctx context.Context) error {
