@@ -238,7 +238,7 @@ func (c *Client) doPoll() error {
 	return c.doScrape(request)
 }
 
-func (c *Client) loop(ctx context.Context, bo backoff.BackOff) {
+func (c *Client) loop(ctx context.Context, bo backoff.BackOff) error {
 	op := func() error {
 		if err := c.doPoll(); err != nil {
 			c.logger.Error(err)
@@ -250,9 +250,9 @@ func (c *Client) loop(ctx context.Context, bo backoff.BackOff) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		default:
-			if err := backoff.RetryNotify(op, bo, func(err error, _ time.Duration) {
+			if err := backoff.RetryNotify(op, backoff.WithContext(bo, ctx), func(err error, _ time.Duration) {
 				c.pollCount.Inc()
 			}); err != nil {
 				c.logger.Error(err)
@@ -286,19 +286,22 @@ func (c *Client) SetLabels(labels map[string]string) *Client {
 	return c
 }
 
-func (c *Client) Run(ctx context.Context) {
-	c.loop(ctx, newBackOffFromFlags(c.retryInitialWait, c.retryMaxWait))
+func (c *Client) Run(ctx context.Context) error {
+	return c.loop(ctx, newBackOffFromFlags(c.retryInitialWait, c.retryMaxWait))
 }
 
-func (c *Client) RunBackGround(ctx context.Context) {
+func (c *Client) RunBackGround(ctx context.Context) <-chan error {
+	ch := make(chan error, 0)
 	go func() {
 		defer func() {
+			close(ch)
 			if err := recover(); err != nil {
 				c.logger.Error(fmt.Errorf("%v", err))
 			}
 		}()
-		c.Run(ctx)
+		ch <- c.Run(ctx)
 	}()
+	return ch
 }
 
 func newBackOffFromFlags(retryInitialWait, retryMaxWait time.Duration) backoff.BackOff {
