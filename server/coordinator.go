@@ -221,6 +221,13 @@ func (c *coordinator) gc() {
 				if ts.expire.Before(limit) {
 					delete(c.known, k)
 					deleted++
+
+					// cancel the request channel
+					ch, ok := c.waiting[k]
+					if ok {
+						ch <- nil
+					}
+
 				}
 			}
 			c.logger.WithFields(map[string]interface{}{

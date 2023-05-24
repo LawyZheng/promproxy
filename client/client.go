@@ -213,7 +213,7 @@ func (c *Client) doPush(resp *http.Response, origRequest *http.Request) error {
 	return nil
 }
 
-func (c *Client) doPoll() error {
+func (c *Client) doPoll(ctx context.Context) error {
 	base, err := url.Parse(c.Endpoint)
 	if err != nil {
 		return errors.Wrap(err, "error parsing url")
@@ -229,7 +229,7 @@ func (c *Client) doPoll() error {
 		Labels: c.labels,
 	})
 
-	req, _ := http.NewRequest(http.MethodPost, url.String(), bytes.NewBuffer(b))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url.String(), bytes.NewBuffer(b))
 	resp, err := c.do(req)
 	if err != nil {
 		return errors.Wrap(err, "error polling")
@@ -264,7 +264,7 @@ func (c *Client) loop(ctx context.Context, bo backoff.BackOff) error {
 	}()
 
 	op := func() error {
-		if err := c.doPoll(); err != nil {
+		if err := c.doPoll(ctx); err != nil {
 			c.logger.Error(err)
 			return err
 		}
