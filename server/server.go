@@ -268,6 +268,10 @@ func (h *Server) RouterHandler() map[string]http.HandlerFunc {
 	return h.rm
 }
 
+func (h *Server) GetKnownClients() []PollClient {
+	return h.coordinator.KnownClients()
+}
+
 // ServeHTTP discriminates between proxy requests (e.g. from Prometheus) and other requests (e.g. from the Client).
 func (h *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Host != "" { // Proxy request
