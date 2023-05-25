@@ -32,6 +32,7 @@ type PollClient interface {
 }
 
 type Coordinator interface {
+	SetLogger(logger logrus.FieldLogger)
 	DoScrape(ctx context.Context, r *http.Request) (*http.Response, error)
 	WaitForScrapeInstruction(client PollClient) (*http.Request, error)
 	ScrapeResult(ctx context.Context, r *http.Response) error
@@ -49,13 +50,13 @@ type coordinator struct {
 	// Clients we know about and when they last contacted us.
 	known map[string]knownClient
 
-	logger              *logrus.Logger
+	logger              logrus.FieldLogger
 	clientCounter       prometheus.Gauge
 	registrationTimeout time.Duration
 }
 
 // newCoordinator initiates the coordinator and starts the client cleanup routine
-func newCoordinator(logger *logrus.Logger) Coordinator {
+func newCoordinator(logger logrus.FieldLogger) Coordinator {
 	counter := newClientGauge()
 	prometheus.MustRegister(counter)
 
@@ -134,6 +135,11 @@ func (c *coordinator) DoScrape(ctx context.Context, r *http.Request) (*http.Resp
 	case resp := <-respCh:
 		return resp, nil
 	}
+}
+
+// SetLogger set logger for coordinator
+func (c *coordinator) SetLogger(logger logrus.FieldLogger) {
+	c.logger = logger
 }
 
 // WaitForScrapeInstruction registers a client waiting for a scrape result

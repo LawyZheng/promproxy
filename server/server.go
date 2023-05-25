@@ -76,7 +76,7 @@ type Server struct {
 	router      Router
 	coordinator Coordinator
 	proxy       http.Handler
-	logger      *logrus.Logger
+	logger      logrus.FieldLogger
 }
 
 func New(router Router) *Server {
@@ -249,8 +249,9 @@ func (h *Server) SetClientAuth(fn func(r *http.Request) error) *Server {
 	return h
 }
 
-func (h *Server) SetLogger(logger *logrus.Logger) *Server {
+func (h *Server) SetLogger(logger logrus.FieldLogger) *Server {
 	h.logger = logger
+	h.coordinator.SetLogger(logger)
 	return h
 }
 
