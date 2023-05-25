@@ -222,10 +222,15 @@ func (c *coordinator) gc() {
 					delete(c.known, k)
 					deleted++
 
-					// cancel the request channel
+					// exhaust existing poll request (eg. timeouted queues)
 					ch, ok := c.waiting[k]
 					if ok {
-						ch <- nil
+						select {
+						case ch <- nil:
+							//
+						default:
+							break
+						}
 					}
 
 				}
