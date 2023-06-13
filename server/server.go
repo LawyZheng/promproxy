@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -224,9 +225,11 @@ func (h *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), util.GetScrapeTimeout(h.MaxScrapeTimeout, h.DefaultScrapeTimeout, r.Header))
+	timeout := util.GetScrapeTimeout(h.MaxScrapeTimeout, h.DefaultScrapeTimeout, r.Header)
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 	request := r.WithContext(ctx)
+	request.Header.Set("X-Prometheus-Scrape-Timeout-Seconds", strconv.FormatFloat(timeout.Seconds(), 'f', -1, 64))
 	request.RequestURI = ""
 
 	resp, err := h.coordinator.DoScrape(ctx, request)
