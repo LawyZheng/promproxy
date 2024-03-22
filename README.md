@@ -1,17 +1,17 @@
 # Promproxy 
 
-Promproxy is fork from [PushProx](https://github.com/prometheus-community/PushProx), which is a client and proxy that allows transversing of NAT and other
+Promproxy is forked from [PushProx](https://github.com/prometheus-community/PushProx), which is a client and proxy that allows transversing of NAT and other
 similar network topologies by Prometheus, while still following the pull model.
 
-Howerver, unlike PushProx includes two applications (proxy and client), promproxy just provides a Go SDK package, so you can implement your own server and client by yourself.
+However, unlike PushProx includes two applications (proxy and client), promproxy just provides a Go SDK package, so you can implement your own server and client by yourself.
 
-It's NOT AN ALTERNATIVE of PushProx. But you can use it more convenient if you're in the Go stack, because you just need to add two lines in your code and everything will start.
+It's NOT AN ALTERNATIVE of PushProx. But you can use it more convenient if you're in the Go stack because you just need to add two lines in your code and everything will start.
 
 While this is reasonably robust in practice, this is a work in progress.
 
 Compared with PushProx, promproxy is:
 
-1. Less network chain(client is embeded by code) and component(only need a server)
+1. Less network chain(client is embedded by code) and component(only need a server)
 2. Self-defined authentication supported
 
 
@@ -48,7 +48,7 @@ You can see more examples [here](./example/client/main.go).
 
 
 ## Config in Prometheus
-In Prometheus, use the proxy as a `proxy_url`, server side will also provide a `http_sd_configs` for the scrape target:
+In Prometheus, use the proxy as a `proxy_url`, server-side will also provide a `http_sd_configs` for the scrape target:
 ```yaml
 scrape_configs:
   - job_name: 'proxy'
@@ -68,8 +68,8 @@ so this workaround is required.
 ## Security
 
 ### Server-Client
-In the client side, you can use `client.SetModifyRequest()` to enable any authentication logic by HTTP requests. But you need to AVOID EMBEDDING YOUR AUTH LOGIC IN THE REQUEST BODY!!! Meanwhile in the server side, you can use `server.SetClientAuth()` to verify the request from client.
+On the client side, you can use `client.SetModifyRequest()` to enable any authentication logic by HTTP requests. But you need to AVOID EMBEDDING YOUR AUTH LOGIC IN THE REQUEST BODY!!! Meanwhile, on the server side, you can use `server.SetClientAuth()` to verify the request from the client.
 
 
 ### Server-Prometheus
-In the server side, you can use `server.SetPromAuth()` to verify the request from Prometheus.
+On the server side, you can use `server.SetPromAuth()` to verify the request from Prometheus.
