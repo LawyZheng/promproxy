@@ -1,77 +1,75 @@
-# PushProx [![CircleCI](https://circleci.com/gh/prometheus-community/PushProx.svg?style=shield)](https://circleci.com/gh/prometheus-community/PushProx)
+# Promproxy 
 
-PushProx is a client and proxy that allows transversing of NAT and other
+Promproxy is fork from [PushProx](https://github.com/prometheus-community/PushProx), which is a client and proxy that allows transversing of NAT and other
 similar network topologies by Prometheus, while still following the pull model.
+
+Howerver, unlike PushProx includes two applications (proxy and client), promproxy just provides a Go SDK package, so you can implement your own server and client by yourself.
+
+It's NOT AN ALTERNATIVE of PushProx. But you can use it more convenient if you're in the Go stack, because you just need to add two lines in your code and everything will start.
 
 While this is reasonably robust in practice, this is a work in progress.
 
-## Running
+Compared with PushProx, promproxy is:
 
-First build the proxy and client:
+1. Less network chain(client is embeded by code) and component(only need a server)
+2. Self-defined authentication supported
 
-```
-git clone https://github.com/lawyzheng/promproxy.git
-cd pushprox
-make build
-```
 
-Run the proxy somewhere both Prometheus and the clients can get to:
+## Usage
 
-```
-./pushprox-proxy
+### Installation
+```shell
+go get github.com/lawyzheng/promproxy
 ```
 
-On every target machine run the client, pointing it at the proxy:
-```
-./pushprox-client --proxy-url=http://proxy:8080/
-```
+### Implement the server (function the same as proxy in PushProx)
+```go
+func main() {
+	// any router engine you like
+	mux := http.NewServeMux()
+	s := server.New(mux)
 
-In Prometheus, use the proxy as a `proxy_url`:
-
+	http.ListenAndServe(":8080", s)
+}
 ```
+Or, you can also embed it with [gin](github.com/gin-gonic/gin) or other HTTP servers.
+
+### Embed the client into your application
+```go
+...
+
+prometheus.MustRegister(createMetric())
+c := client.New("client_with_default", "http://localhost:8080", nil)
+<-c.RunBackGround(context.Background())
+
+...
+```
+You can see more examples [here](./example/client/main.go).
+
+
+## Config in Prometheus
+In Prometheus, use the proxy as a `proxy_url`, server side will also provide a `http_sd_configs` for the scrape target:
+```yaml
 scrape_configs:
-- job_name: node
-  proxy_url: http://proxy:8080/
-  static_configs:
-    - targets: ['client:9100']  # Presuming the FQDN of the client is "client".
+  - job_name: 'proxy'
+    proxy_url: http://<server_ip_address>:<server_port>
+    http_sd_configs:
+      - url: http://<server_ip_address>:<server_port>/clients
 ```
 
 If the target must be scraped over SSL/TLS, add:
-```
+```yaml
   params:
     _scheme: [https]
 ```
 rather than the usual `scheme: https`. Only the default `scheme: http` works with the proxy,
 so this workaround is required.
 
-## Service Discovery
-
-The `/clients` endpoint will return a list of all registered clients in the format
-used by `file_sd_configs`. You could use wget in a cronjob to put it somewhere
-file\_sd\_configs can read and then then relabel as needed.
-
-## How It Works
-
-![Sequence diagram](./docs/sequence.svg)
-
-Clients perform scrapes in a network environment that's not directly accessible by Prometheus. 
-The Proxy is accessible by both the Clients and Prometheus.
-Each client is identified by its fqdn.
-
-For example, the following sequence is performed when Prometheus scrapes target `fqdn-x` via PushProx.
-First, a Client polls the Proxy for scrape requests, and includes its fqdn in the poll (1). 
-The Proxy does not respond yet.
-Next, Prometheus tries to scrape the target with hostname `fqdn-x` via the Proxy (2).
-Using the fqdn received in (1), the Proxy now routes the scrape to the correct Client: the scrape request is in the response body of the poll (3).
-This scrape request is executed by the client (4), the response containing metrics (5) is posted to the Proxy (6). 
-On its turn, the Proxy returns this to Prometheus (7) as a reponse to the initial scrape of (2).
-
-PushProx passes all HTTP headers transparently, features like compression and accept encoding are up to the scraping Prometheus server.
-
 ## Security
 
-There is no authentication or authorisation included, a reverse proxy can be
-put in front though to add these.
+### Server-Client
+In the client side, you can use `client.SetModifyRequest()` to enable any authentication logic by HTTP requests. But you need to AVOID EMBEDDING YOUR AUTH LOGIC IN THE REQUEST BODY!!! Meanwhile in the server side, you can use `server.SetClientAuth()` to verify the request from client.
 
-Running the client allows those with access to the proxy or the client to access
-all network services on the machine hosting the client.
+
+### Server-Prometheus
+In the server side, you can use `server.SetPromAuth()` to verify the request from Prometheus.
